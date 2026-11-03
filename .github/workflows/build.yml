@@ -37,9 +37,25 @@ jobs:
           python -m pip install cython==0.29.34
 
       - name: Build APK
-        run: yes | buildozer android debug
+        run: |
+          set +e
+          yes | buildozer android debug 2>&1 | tee build.log
+          BUILD_STATUS=${PIPESTATUS[1]}
+          echo "Build exit code: $BUILD_STATUS"
+          echo "---- BUILD ERRORS ----"
+          grep -inE "error:|fatal error:|exception|failed" build.log | tail -40 || true
+          exit $BUILD_STATUS
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-Build-Log
+          path: build.log
+          if-no-files-found: ignore
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: JARVIS-APK
