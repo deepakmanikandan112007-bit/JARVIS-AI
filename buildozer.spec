@@ -3,6 +3,7 @@
 title = JARVIS AI
 package.name = jarvisai
 package.domain = org.deepak
+
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 
