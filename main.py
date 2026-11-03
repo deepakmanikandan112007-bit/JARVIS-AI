@@ -1,3 +1,4 @@
+
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
@@ -9,13 +10,35 @@ from kivy.metrics import dp
 from kivy.core.window import Window
 from math import sin, cos, pi, hypot
 
-try:
-    from plyer import tts
-except ImportError:
-    tts = None
-
+# Android Native Text-to-Speech
+from jnius import autoclass, PythonJavaClass, java_method
+from android.runnable import run_on_ui_thread
 
 Window.clearcolor = (0.005, 0.012, 0.012, 1)
+
+
+class TTSListener(PythonJavaClass):
+
+    __javainterfaces__ = [
+        'android/speech/tts/TextToSpeech$OnInitListener'
+    ]
+    __javacontext__ = 'app'
+
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+
+    @java_method('(I)V')
+    def onInit(self, status):
+        self.app.tts_ready = (status == 0)
+
+        if self.app.tts_ready:
+            try:
+                Locale = autoclass('java.util.Locale')
+                self.app.tts_engine.setLanguage(Locale.US)
+                print("JARVIS TTS READY")
+            except Exception as e:
+                print("TTS Language Error:", e)
 
 
 class Reactor(Widget):
@@ -38,26 +61,21 @@ class Reactor(Widget):
 
         Clock.schedule_interval(self.animate, 1 / 30)
 
-    # Automatic rotation
     def animate(self, dt):
         self.time += dt
         self.angle += self.auto_speed * dt
         self.redraw()
 
-    # 3D rotation mathematics
     def rotate_3d(self, x, y, z):
 
-        # Rotate around Y axis
         x1 = x * cos(self.angle) + z * sin(self.angle)
         z1 = -x * sin(self.angle) + z * cos(self.angle)
 
-        # Rotate around X axis
         y2 = y * cos(self.tilt) - z1 * sin(self.tilt)
         z2 = y * sin(self.tilt) + z1 * cos(self.tilt)
 
         return x1, y2, z2
 
-    # Create orbital points
     def get_orbit_point(self, t, radius, plane):
 
         if plane == 0:
@@ -104,14 +122,12 @@ class Reactor(Widget):
 
         with self.canvas:
 
-            # Reactor background glow
             Color(0, 1, 0.5, 0.04)
             Ellipse(
                 pos=(cx - radius * 1.6, cy - radius * 1.6),
                 size=(radius * 3.2, radius * 3.2)
             )
 
-            # Six orbital rings
             for plane in range(6):
 
                 points = []
@@ -131,7 +147,6 @@ class Reactor(Widget):
 
                     points.extend([px, py])
 
-                # Ring glow
                 Color(0, 1, 0.45, 0.12)
                 Line(
                     points=points,
@@ -139,7 +154,6 @@ class Reactor(Widget):
                     joint="round"
                 )
 
-                # Main ring
                 Color(0, 1, 0.55, 0.85)
                 Line(
                     points=points,
@@ -147,7 +161,6 @@ class Reactor(Widget):
                     joint="round"
                 )
 
-                # Moving particle
                 particle_t = (
                     self.time * (0.8 + plane * 0.15)
                 ) % (2 * pi)
@@ -166,7 +179,6 @@ class Reactor(Widget):
                     size=(dp(8), dp(8))
                 )
 
-            # Central reactor
             core = radius * 0.38
 
             Color(0, 1, 0.5, 0.12)
@@ -193,14 +205,12 @@ class Reactor(Widget):
                 size=(core*0.5, core*0.5)
             )
 
-    # Touch start
     def on_touch_down(self, touch):
 
         if not self.collide_point(*touch.pos):
             return False
 
         touch.grab(self)
-
         self.touches[touch.uid] = touch.pos
 
         if len(self.touches) == 2:
@@ -234,7 +244,6 @@ class Reactor(Widget):
 
         return True
 
-    # Touch movement
     def on_touch_move(self, touch):
 
         if touch.grab_current is not self:
@@ -242,7 +251,6 @@ class Reactor(Widget):
 
         self.touches[touch.uid] = touch.pos
 
-        # Pinch zoom
         if len(self.touches) >= 2:
 
             positions = list(self.touches.values())
@@ -258,17 +266,13 @@ class Reactor(Widget):
                     factor = distance / self.last_distance
 
                     self.zoom *= factor
-                    self.zoom = max(
-                        0.5,
-                        min(self.zoom, 2.5)
-                    )
+                    self.zoom = max(0.5, min(self.zoom, 2.5))
 
             self.last_distance = distance
             self.redraw()
 
             return True
 
-        # One finger rotation / movement
         dx = touch.dx
         dy = touch.dy
 
@@ -279,10 +283,7 @@ class Reactor(Widget):
             self.angle += dx * 0.025
             self.tilt += dy * 0.018
 
-            self.tilt = max(
-                -2.5,
-                min(self.tilt, 2.5)
-            )
+            self.tilt = max(-2.5, min(self.tilt, 2.5))
 
         elif mode == "move":
 
@@ -292,13 +293,11 @@ class Reactor(Widget):
         self.redraw()
         return True
 
-    # Touch release
     def on_touch_up(self, touch):
 
         if touch.grab_current is self:
 
             touch.ungrab(self)
-
             self.touches.pop(touch.uid, None)
 
             if len(self.touches) < 2:
@@ -312,6 +311,10 @@ class Reactor(Widget):
 class JarvisApp(App):
 
     def build(self):
+
+        self.tts_engine = None
+        self.tts_listener = None
+        self.tts_ready = False
 
         main = BoxLayout(
             orientation="vertical",
@@ -334,9 +337,7 @@ class JarvisApp(App):
             size_hint_y=0.06
         )
 
-        reactor = Reactor(
-            size_hint=(1, 0.68)
-        )
+        reactor = Reactor(size_hint=(1, 0.68))
 
         activate = Button(
             text="ACTIVATE JARVIS",
@@ -347,29 +348,70 @@ class JarvisApp(App):
             font_size="18sp"
         )
 
-        activate.bind(
-            on_press=self.activate_jarvis
-        )
+        activate.bind(on_press=self.activate_jarvis)
 
         main.add_widget(title)
         main.add_widget(status)
         main.add_widget(reactor)
         main.add_widget(activate)
 
+        Clock.schedule_once(self.initialize_tts, 1)
+
         return main
 
+    @run_on_ui_thread
+    def initialize_tts(self, dt):
+
+        try:
+            PythonActivity = autoclass(
+                'org.kivy.android.PythonActivity'
+            )
+
+            TextToSpeech = autoclass(
+                'android.speech.tts.TextToSpeech'
+            )
+
+            activity = PythonActivity.mActivity
+
+            self.tts_listener = TTSListener(self)
+
+            self.tts_engine = TextToSpeech(
+                activity,
+                self.tts_listener
+            )
+
+            print("JARVIS TTS INITIALIZING")
+
+        except Exception as e:
+            print("TTS Initialization Error:", e)
+
+    @run_on_ui_thread
     def activate_jarvis(self, instance):
 
         message = "Hello. I am Jarvis. How can I help you?"
 
-        if tts:
-            try:
-                tts.speak(message)
-            except Exception as e:
-                print("Voice Error:", e)
-        else:
-            print(message)
+        try:
+            if self.tts_engine is not None and self.tts_ready:
+
+                TextToSpeech = autoclass(
+                    'android.speech.tts.TextToSpeech'
+                )
+
+                self.tts_engine.speak(
+                    message,
+                    TextToSpeech.QUEUE_FLUSH,
+                    None
+                )
+
+                print("JARVIS SPEAKING")
+
+            else:
+                print("JARVIS TTS IS NOT READY")
+
+        except Exception as e:
+            print("Voice Error:", e)
 
 
 if __name__ == "__main__":
     JarvisApp().run()
+        
