@@ -12,24 +12,21 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build JARVIS Android APK
     runs-on: ubuntu-22.04
     timeout-minutes: 90
 
     steps:
-      # 1. Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. System dependencies
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -40,34 +37,72 @@ jobs:
             libffi-dev libssl-dev automake \
             build-essential
 
-      # 4. Python
+      - name: Verify Apache Ant
+        run: |
+          ant -version
+          test -d /usr/share/ant
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
-      # 5. Buildozer installation
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
-          python -m pip install buildozer setuptools
+          python -m pip install buildozer setuptools wheel
           python -m pip install cython==0.29.34
 
-      # 6. Check project files
       - name: Check project files
         run: |
           test -f main.py
           test -f buildozer.spec
           echo "JARVIS project files found"
 
-      # 7. Build APK
+      - name: Configure Android Ant path
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("buildozer.spec")
+          lines = path.read_text().splitlines()
+
+          result = []
+          in_app = False
+          ant_found = False
+
+          for line in lines:
+              stripped = line.strip()
+
+              if stripped.startswith("[") and stripped.endswith("]"):
+                  in_app = stripped == "[app]"
+
+              if in_app and stripped.startswith("android.ant_path"):
+                  result.append("android.ant_path = /usr/share/ant")
+                  ant_found = True
+              else:
+                  result.append(line)
+
+          if not ant_found:
+              for i, line in enumerate(result):
+                  if line.strip() == "[app]":
+                      result.insert(i + 1,
+                                    "android.ant_path = /usr/share/ant")
+                      ant_found = True
+                      break
+
+          if not ant_found:
+              raise SystemExit("[app] section missing in buildozer.spec")
+
+          path.write_text("\n".join(result) + "\n")
+          print("Apache Ant path configured")
+          PY
+
       - name: Build JARVIS APK
         run: |
           set -o pipefail
-          yes | buildozer -v android debug 2>&1 | tee build.log
+          buildozer -v android debug 2>&1 | tee build.log
 
-      # 8. Upload APK
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
@@ -77,7 +112,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # 9. Upload logs
       - name: Upload Build Log
         if: always()
         uses: actions/upload-artifact@v4
