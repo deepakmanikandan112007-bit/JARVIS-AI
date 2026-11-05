@@ -14,7 +14,7 @@ jobs:
   build:
     name: Build JARVIS Android APK
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
@@ -37,11 +37,6 @@ jobs:
             libffi-dev libssl-dev automake \
             build-essential
 
-      - name: Verify Apache Ant
-        run: |
-          ant -version
-          test -d /usr/share/ant
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -57,52 +52,54 @@ jobs:
         run: |
           test -f main.py
           test -f buildozer.spec
-          echo "JARVIS project files found"
+          echo "JARVIS files found"
 
-      - name: Configure Android Ant path
+      # Initialize Android SDK
+      - name: Initialize Android SDK
         run: |
-          python - <<'PY'
-          from pathlib import Path
+          set +e
+          yes | buildozer android debug \
+            > bootstrap.log 2>&1
+          echo "SDK initialization attempt completed"
+          set -e
 
-          path = Path("buildozer.spec")
-          lines = path.read_text().splitlines()
+      # Accept all Android SDK licenses
+      - name: Accept Android SDK Licenses
+        run: |
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
 
-          result = []
-          in_app = False
-          ant_found = False
+          if [ ! -d "$SDK" ]; then
+            echo "Android SDK directory not found"
+            cat bootstrap.log
+            exit 1
+          fi
 
-          for line in lines:
-              stripped = line.strip()
+          SDKMANAGER=$(find "$SDK" \
+            -type f -name sdkmanager | head -n 1)
 
-              if stripped.startswith("[") and stripped.endswith("]"):
-                  in_app = stripped == "[app]"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found"
+            cat bootstrap.log
+            exit 1
+          fi
 
-              if in_app and stripped.startswith("android.ant_path"):
-                  result.append("android.ant_path = /usr/share/ant")
-                  ant_found = True
-              else:
-                  result.append(line)
+          echo "Using SDK Manager: $SDKMANAGER"
 
-          if not ant_found:
-              for i, line in enumerate(result):
-                  if line.strip() == "[app]":
-                      result.insert(i + 1,
-                                    "android.ant_path = /usr/share/ant")
-                      ant_found = True
-                      break
+          yes | "$SDKMANAGER" \
+            --sdk_root="$SDK" --licenses
 
-          if not ant_found:
-              raise SystemExit("[app] section missing in buildozer.spec")
+          "$SDKMANAGER" \
+            --sdk_root="$SDK" \
+            "platform-tools" \
+            "build-tools;37.0.0"
 
-          path.write_text("\n".join(result) + "\n")
-          print("Apache Ant path configured")
-          PY
-
+      # Build APK
       - name: Build JARVIS APK
         run: |
           set -o pipefail
-          buildozer -v android debug 2>&1 | tee build.log
+          yes | buildozer -v android debug 2>&1 | tee build.log
 
+      # Upload APK
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
@@ -112,12 +109,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload Build Log
+      # Upload logs
+      - name: Upload Build Logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: JARVIS-Build-Log
-          path: build.log
+          name: JARVIS-Build-Logs
+          path: |
+            build.log
+            bootstrap.log
           if-no-files-found: ignore
           retention-days: 7
           
