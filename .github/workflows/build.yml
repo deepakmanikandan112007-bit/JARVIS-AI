@@ -1,3 +1,4 @@
+
 name: Build JARVIS APK
 
 on:
@@ -6,46 +7,77 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
 
     steps:
+      # 1. Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
-      - name: Install system dependencies
+      # 3. System dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip autoconf libtool pkg-config zlib1g-dev libncurses5-dev cmake libffi-dev libssl-dev automake
+          sudo apt-get install -y \
+            git zip unzip ant \
+            autoconf libtool pkg-config \
+            zlib1g-dev libncurses5-dev \
+            libncursesw5-dev cmake \
+            libffi-dev libssl-dev automake \
+            build-essential
 
+      # 4. Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
+      # 5. Buildozer installation
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
           python -m pip install buildozer setuptools
           python -m pip install cython==0.29.34
 
-      - name: Build APK
+      # 6. Check project files
+      - name: Check project files
         run: |
-          set +e
-          yes | buildozer android debug 2>&1 | tee build.log
-          BUILD_STATUS=${PIPESTATUS[1]}
-          echo "Build exit code: $BUILD_STATUS"
-          echo "---- BUILD ERRORS ----"
-          grep -inE "error:|fatal error:|exception|failed" build.log | tail -40 || true
-          exit $BUILD_STATUS
+          test -f main.py
+          test -f buildozer.spec
+          echo "JARVIS project files found"
 
+      # 7. Build APK
+      - name: Build JARVIS APK
+        run: |
+          set -o pipefail
+          yes | buildozer -v android debug 2>&1 | tee build.log
+
+      # 8. Upload APK
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-APK
+          path: bin/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      # 9. Upload logs
       - name: Upload Build Log
         if: always()
         uses: actions/upload-artifact@v4
@@ -53,10 +85,5 @@ jobs:
           name: JARVIS-Build-Log
           path: build.log
           if-no-files-found: ignore
-
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: JARVIS-APK
-          path: bin/*.apk
+          retention-days: 7
+          
